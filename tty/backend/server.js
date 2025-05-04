@@ -37,18 +37,35 @@ if (process.env.MONGODB_URI) {
 }
 
 // 6. Configure Static Files
-const staticPath = path.join(__dirname, '../../frontend');
+const getStaticPath = () => {
+  const basePath = path.join(__dirname, '../../tty/frontend');
+  const renderPath = path.join(__dirname, '../../../tty/frontend'); // For Render
+  
+  if (process.env.NODE_ENV === 'production' && fs.existsSync(renderPath)) {
+    console.log('Using Render-compatible frontend path');
+    return renderPath;
+  }
+  return basePath;
+};
+
+const staticPath = getStaticPath();
 const uploadsPath = path.join(__dirname, 'public/uploads');
 
 // Ensure directories exist
-[staticPath, uploadsPath].forEach(dir => {
+[uploadsPath].forEach(dir => {
   if (!fs.existsSync(dir)) {
+    console.log(`Creating directory: ${dir}`);
     fs.mkdirSync(dir, { recursive: true });
   }
 });
 
-app.use(express.static(staticPath));
-app.use('/uploads', express.static(uploadsPath));
+// Serve static files with fallback
+if (fs.existsSync(path.join(staticPath, 'index.html'))) {
+  app.use(express.static(staticPath));
+  console.log(`✅ Serving frontend from: ${staticPath}`);
+} else {
+  console.warn(`⚠️ Frontend not found at: ${staticPath}`);
+}
 
 // 7. Multer Configuration
 const storage = multer.diskStorage({
@@ -67,7 +84,18 @@ const upload = multer({
 
 // 8. Routes
 app.get('/', (req, res) => {
-  res.sendFile(path.join(staticPath, 'index.html'));
+  const indexPath = path.join(staticPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(200).json({
+      status: 'running',
+      message: 'Video Upload API is operational',
+      endpoints: {
+        upload: 'POST /upload'
+      }
+    });
+  }
 });
 
 app.post('/upload', upload.single('video'), async (req, res) => {
@@ -99,18 +127,20 @@ app.post('/upload', upload.single('video'), async (req, res) => {
     console.error('Upload Error:', err);
     res.status(500).json({ 
       error: "Upload failed",
-      details: err.message
+      details: err.message,
+      solution: "Check file size (<100MB) and format (MP4, MOV, etc.)"
     });
   }
 });
 
 // 9. Start Server
-const PORT = process.env.PORT || 10000; // Render uses 10000
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`
 ✅ Server running on port ${PORT}
 📌 Upload endpoint: POST http://localhost:${PORT}/upload
 📁 Local storage: ${uploadsPath}
 🌐 Frontend: ${staticPath}
+🔍 Environment: ${process.env.NODE_ENV || 'development'}
   `);
 });

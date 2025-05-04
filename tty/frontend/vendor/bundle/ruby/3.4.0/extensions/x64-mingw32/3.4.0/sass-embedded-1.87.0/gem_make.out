@@ -1,0 +1,5 @@
+current directory: D:/video-site/frontend/vendor/bundle/ruby/3.4.0/gems/sass-embedded-1.87.0/ext/sass
+C:/msys64/mingw64/bin/ruby.exe -rrubygems D:/video-site/frontend/vendor/bundle/ruby/3.4.0/gems/rake-13.2.1/exe/rake RUBYARCHDIR\=D:/video-site/frontend/vendor/bundle/ruby/3.4.0/extensions/x64-mingw32/3.4.0/sass-embedded-1.87.0 RUBYLIBDIR\=D:/video-site/frontend/vendor/bundle/ruby/3.4.0/extensions/x64-mingw32/3.4.0/sass-embedded-1.87.0
+gem install --force --install-dir D:/video-site/frontend/vendor/bundle/ruby/3.4.0/gems/sass-embedded-1.87.0/ext/sass/ruby --no-document --ignore-dependencies --platform x64-mingw-ucrt --version 1.87.0 sass-embedded
+mv D:/video-site/frontend/vendor/bundle/ruby/3.4.0/gems/sass-embedded-1.87.0/ext/sass/ruby/gems/sass-embedded-1.87.0-x64-mingw-ucrt/ext/sass/dart-sass dart-sass
+rm -rf D:/video-site/frontend/vendor/bundle/ruby/3.4.0/gems/sass-embedded-1.87.0/ext/sass/ruby

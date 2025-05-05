@@ -8,6 +8,8 @@ const mongoose = require('mongoose');
 const fs = require('fs');
 const path = require('path');
 
+// Initialize __dirname for Windows compatibility
+
 // 2. Initialize App
 const app = express();
 
@@ -16,8 +18,8 @@ app.use(cors());
 app.use(express.json());
 
 // Debug logs
-console.log('Current directory:', process.cwd());
-console.log('Trying to load .env from:', path.resolve('.env'));
+console.log('Current directory:', __dirname);
+console.log('Trying to load .env from:', path.join(__dirname, '.env'));
 
 // 4. MongoDB Video Schema
 const videoSchema = new mongoose.Schema({
@@ -40,71 +42,176 @@ if (process.env.CLOUDINARY_NAME) {
   });
 }
 
-// 6. MongoDB Connection - UPDATED SECTION
+// 6. Path configurations
+const staticPath = path.join(__dirname, '../../tty/frontend');
+const uploadsPath = path.join(__dirname, 'public/uploads');
+
+// Ensure directories exist
+[uploadsPath].forEach(dir => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+    console.log(`Created directory: ${dir}`);
+  }
+});
+
+// 7. MongoDB Connection
 const connectDB = async () => {
+  if (!process.env.MONGODB_URI) {
+    console.error('❌ MONGODB_URI not defined in environment');
+    process.exit(1);
+  }
+
   try {
     await mongoose.connect(process.env.MONGODB_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 15000 // Increased timeout
+      serverSelectionTimeoutMS: 15000
     });
     console.log('✅ Connected to MongoDB');
-    
-    // Connection event listeners
-    mongoose.connection.on('connected', () => console.log('Mongoose connected'));
-    mongoose.connection.on('error', (err) => console.error('Mongoose error:', err));
-    mongoose.connection.on('disconnected', () => console.log('Mongoose disconnected'));
-    
   } catch (err) {
-    console.error('❌ Critical MongoDB connection error:', err);
-    process.exit(1); // Exit process on connection failure
+    console.error('❌ MongoDB connection error:', err.message);
+    process.exit(1);
   }
 };
 
-// Immediately invoke connection
-connectDB();
+// Connection event listeners
+mongoose.connection.on('connected', () => console.log('Mongoose connected'));
+mongoose.connection.on('error', (err) => console.error('Mongoose error:', err));
+mongoose.connection.on('disconnected', () => console.log('Mongoose disconnected'));
 
-// 7. Configure Static Files 
-// ... (rest of your existing static files configuration remains the same)
-// ... (keep all your existing multer, routes, and server setup)
+// 8. Multer Configuration
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsPath);
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + '-' + file.originalname);
+  }
+});
 
-// Health check endpoint - ENHANCED VERSION
+const upload = multer({ 
+  storage,
+  limits: { fileSize: 100 * 1024 * 1024 } // 100MB
+});
+
+// 9. Serve static files
+if (fs.existsSync(path.join(staticPath, 'index.html'))) {
+  app.use(express.static(staticPath));
+  console.log(`✅ Serving frontend from: ${staticPath}`);
+} else {
+  console.warn(`⚠️ Frontend not found at: ${staticPath}`);
+}
+
+// 10. Routes
+app.get('/', (req, res) => {
+  const indexPath = path.join(staticPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(200).json({
+      status: 'running',
+      message: 'Video Upload API is operational',
+      endpoints: {
+        upload: 'POST /upload',
+        videos: 'GET /videos'
+      }
+    });
+  }
+});
+
+// Upload endpoint
+app.post('/upload', upload.single('video'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+    let cloudinaryUrl, duration;
+    if (process.env.CLOUDINARY_NAME) {
+      const cloudResult = await cloudinary.uploader.upload(req.file.path, {
+        resource_type: "video",
+        folder: "videos"
+      });
+      cloudinaryUrl = cloudResult.secure_url;
+      duration = cloudResult.duration;
+      fs.unlinkSync(req.file.path);
+    }
+
+    const video = new Video({
+      filename: req.file.originalname,
+      path: `/uploads/${req.file.filename}`,
+      cloudinaryUrl,
+      size: req.file.size,
+      duration
+    });
+
+    await video.save();
+
+    res.json({
+      status: "success",
+      video: {
+        id: video._id,
+        url: cloudinaryUrl || `/uploads/${req.file.filename}`,
+        filename: video.filename,
+        duration: video.duration
+      }
+    });
+
+  } catch (err) {
+    console.error('Upload Error:', err);
+    res.status(500).json({ 
+      error: "Upload failed",
+      details: err.message
+    });
+  }
+});
+
+// Video endpoints
+app.get('/videos', async (req, res) => {
+  try {
+    const videos = await Video.find().sort({ uploadDate: -1 });
+    res.json(videos);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/videos/:id', async (req, res) => {
+  try {
+    const video = await Video.findById(req.params.id);
+    if (!video) return res.status(404).json({ error: "Video not found" });
+    res.json(video);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Health check endpoint
 app.get('/health', (req, res) => {
-  const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
-  const cloudinaryStatus = process.env.CLOUDINARY_NAME ? 'configured' : 'not configured';
-  
   res.json({
-    status: dbStatus === 'connected' ? 'healthy' : 'degraded',
+    status: mongoose.connection.readyState === 1 ? 'healthy' : 'degraded',
     services: {
-      database: dbStatus,
-      cloudinary: cloudinaryStatus,
-      storage: fs.existsSync(uploadsPath) ? 'available' : 'unavailable',
-      environment: process.env.NODE_ENV || 'development'
+      database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+      cloudinary: process.env.CLOUDINARY_NAME ? 'configured' : 'not configured',
+      storage: fs.existsSync(uploadsPath) ? 'available' : 'unavailable'
     }
   });
 });
 
-// 10. Start Server - UPDATED WITH CONNECTION CHECK
+// Start Server
 const startServer = async () => {
+  await connectDB();
   const PORT = process.env.PORT || 10000;
   
-  // Only start server if MongoDB connection succeeds
-  if (mongoose.connection.readyState === 1) {
-    app.listen(PORT, () => {
-      console.log(`
+  app.listen(PORT, () => {
+    console.log(`
 ✅ Server running on port ${PORT}
 📌 Upload endpoint: POST http://localhost:${PORT}/upload
 📺 Video gallery: GET http://localhost:${PORT}/videos
 📁 Local storage: ${uploadsPath}
 🌐 Frontend: ${staticPath}
 🔍 Environment: ${process.env.NODE_ENV || 'development'}
-      `);
-    });
-  } else {
-    console.error('⛔ Server not started - MongoDB connection failed');
-    process.exit(1);
-  }
+    `);
+  });
 };
 
-// Delay server start to allow connection
-setTimeout(startServer, 2000);
+startServer().catch(err => {
+  console.error('⛔ Failed to start server:', err);
+  process.exit(1);
+});

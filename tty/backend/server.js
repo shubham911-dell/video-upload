@@ -1,212 +1,171 @@
-// 1. Environment and Dependencies
-require('dotenv').config({ debug: true });
-const express = require('express');
-const cors = require('cors');
-const multer = require('multer');
+// 1. Load Environment & Dependencies
+require('dotenv').config();
+const express   = require('express');
+const cors      = require('cors');
+const multer    = require('multer');
 const cloudinary = require('cloudinary').v2;
-const mongoose = require('mongoose');
-const fs = require('fs');
-const path = require('path');
+const mongoose  = require('mongoose');
+const fs        = require('fs');
+const path      = require('path');
 
-// 2. Initialize App
+// 2. App Init
 const app = express();
-
-// 3. Middleware
 app.use(cors());
 app.use(express.json());
 
-// Debug logs
-console.log('Current directory:', __dirname);
-console.log('Trying to load .env from:', path.join(__dirname, '.env'));
+// 3. Determine Environment
+const isProduction = process.env.NODE_ENV === 'production';
 
-// 4. MongoDB Video Schema
-const videoSchema = new mongoose.Schema({
-  filename: String,
-  path: String,
-  cloudinaryUrl: String,
-  uploadDate: { type: Date, default: Date.now },
-  size: Number,
-  duration: Number
-});
-const Video = mongoose.model('Video', videoSchema);
+// 4. Debug Info
+console.log('▶️  Environment:', process.env.NODE_ENV || 'development');
+console.log('▶️  Using Cloudinary:', !!process.env.CLOUDINARY_NAME);
 
-// 5. Cloudinary Configuration
+// 5. Configure Cloudinary (only needs your creds; usage gated below)
 if (process.env.CLOUDINARY_NAME) {
   cloudinary.config({
     cloud_name: process.env.CLOUDINARY_NAME,
-    api_key: process.env.CLOUDINARY_KEY,
+    api_key:    process.env.CLOUDINARY_KEY,
     api_secret: process.env.CLOUDINARY_SECRET,
-    secure: true
+    secure:     true
   });
 }
 
-// 6. Path configurations
-// Assuming server.js lives in tty/backend, and your static frontend is in tty/frontend:
-const staticPath = path.join(__dirname, '../frontend');
+// 6. MongoDB Schema
+const videoSchema = new mongoose.Schema({
+  filename:     String,
+  path:         String,        // local URL
+  cloudinaryUrl:String,        // remote URL
+  uploadDate:   { type: Date, default: Date.now },
+  size:         Number,
+  duration:     Number
+});
+const Video = mongoose.model('Video', videoSchema);
+
+// 7. Paths
+const staticPath  = path.join(__dirname, '../frontend');
 const uploadsPath = path.join(__dirname, 'public/uploads');
+fs.mkdirSync(uploadsPath, { recursive: true });
 
-// Ensure uploads directory exists
-if (!fs.existsSync(uploadsPath)) {
-  fs.mkdirSync(uploadsPath, { recursive: true });
-  console.log(`Created directory: ${uploadsPath}`);
+// 8. Serve Static
+if (fs.existsSync(path.join(staticPath, 'index.html'))) {
+  app.use(express.static(staticPath));
 }
+app.use('/uploads', express.static(uploadsPath));
 
-// 7. MongoDB Connection
-const connectDB = async () => {
-  if (!process.env.MONGODB_URI) {
-    console.error('❌ MONGODB_URI not defined in environment');
-    process.exit(1);
-  }
-  try {
-    await mongoose.connect(process.env.MONGODB_URI, {
-      serverSelectionTimeoutMS: 15000
-    });
-    console.log('✅ Connected to MongoDB');
-  } catch (err) {
-    console.error('❌ MongoDB connection error:', err.message);
-    process.exit(1);
-  }
-};
-
-mongoose.connection
-  .on('connected',  () => console.log('Mongoose connected'))
-  .on('error',      (err) => console.error('Mongoose error:', err))
-  .on('disconnected',() => console.log('Mongoose disconnected'));
-
-// 8. Multer Configuration
+// 9. Multer Setup
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadsPath),
-  filename:    (req, file, cb) => cb(null, Date.now() + '-' + file.originalname)
+  destination: (_req, _file, cb) => cb(null, uploadsPath),
+  filename:    (_req, file, cb) => cb(null, Date.now() + '-' + file.originalname)
 });
 const upload = multer({
   storage,
   limits: { fileSize: 100 * 1024 * 1024 } // 100MB
 });
 
-// 9. Serve static files
-// - Frontend
-if (fs.existsSync(path.join(staticPath, 'index.html'))) {
-  app.use(express.static(staticPath));
-  console.log(`✅ Serving frontend from: ${staticPath}`);
-} else {
-  console.warn(`⚠️ Frontend not found at: ${staticPath}`);
+// 10. Connect to MongoDB
+async function connectDB() {
+  if (!process.env.MONGODB_URI) {
+    console.error('MONGODB_URI missing in .env');
+    process.exit(1);
+  }
+  try {
+    await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 15000 });
+    console.log('✅ MongoDB connected');
+  } catch (err) {
+    console.error('❌ MongoDB error:', err.message);
+    process.exit(1);
+  }
 }
+mongoose.connection
+  .on('error', err => console.error('Mongo error:', err))
+  .on('disconnected', () => console.log('Mongo disconnected'));
 
-// - Uploaded files (in case Cloudinary isn’t configured)
-app.use('/uploads', express.static(uploadsPath));
+// 11. Routes
 
-// 10. Routes
+// Health & Info
+app.get('/health', (_req, res) => {
+  res.json({
+    env: process.env.NODE_ENV || 'development',
+    db:  mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    cloudinary: !!process.env.CLOUDINARY_NAME
+  });
+});
 
-// Root → serve index.html or API info
+// Homepage or API Info
 app.get('/', (req, res) => {
-  const indexPath = path.join(staticPath, 'index.html');
-  if (fs.existsSync(indexPath)) {
-    return res.sendFile(indexPath);
-  }
-  res.json({
-    status: 'running',
-    message: 'Video Upload API is operational',
-    endpoints: {
-      upload: 'POST /upload',
-      videos: 'GET /videos'
-    }
-  });
+  const html = path.join(staticPath, 'index.html');
+  if (fs.existsSync(html)) return res.sendFile(html);
+  res.json({ status: 'running', endpoints: ['POST /upload', 'GET /videos'] });
 });
 
-// Upload endpoint
+// Upload Endpoint
 app.post('/upload', upload.single('video'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: "No file uploaded" });
-    }
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-    let cloudinaryUrl, duration;
-    if (process.env.CLOUDINARY_NAME) {
-      const cloudResult = await cloudinary.uploader.upload(req.file.path, {
-        resource_type: "video",
-        folder: "videos"
+  let cloudinaryUrl = null, duration = null;
+  const localPath = `/uploads/${req.file.filename}`;
+
+  // Only upload to Cloudinary in production *and* if configured
+  if (isProduction && process.env.CLOUDINARY_NAME) {
+    try {
+      console.log('📤 Uploading to Cloudinary...');
+      const result = await cloudinary.uploader.upload(req.file.path, {
+        resource_type: 'video',
+        folder:        'videos'
       });
-      cloudinaryUrl = cloudResult.secure_url;
-      duration = cloudResult.duration;
-      // remove local temp file
+      cloudinaryUrl = result.secure_url;
+      duration      = result.duration;
+      console.log('✅ Cloudinary URL:', cloudinaryUrl);
+
+      // Delete local copy only on success
       fs.unlinkSync(req.file.path);
+      console.log('🗑️  Local file removed');
+    } catch (err) {
+      console.error('❌ Cloudinary upload failed:', err.message);
+      // keep local file
     }
-
-    const video = new Video({
-      filename: req.file.originalname,
-      path: `/uploads/${req.file.filename}`,
-      cloudinaryUrl,
-      size: req.file.size,
-      duration
-    });
-    await video.save();
-
-    res.json({
-      status: "success",
-      video: {
-        id: video._id,
-        url: cloudinaryUrl || video.path,
-        filename: video.filename,
-        duration: video.duration
-      }
-    });
-
-  } catch (err) {
-    console.error('Upload Error:', err);
-    res.status(500).json({ error: "Upload failed", details: err.message });
   }
-});
 
-// List all videos
-app.get('/videos', async (req, res) => {
-  try {
-    const videos = await Video.find().sort({ uploadDate: -1 });
-    res.json(videos);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  // Save metadata
+  const video = new Video({
+    filename:     req.file.originalname,
+    path:         localPath,
+    cloudinaryUrl,
+    size:         req.file.size,
+    duration
+  });
+  await video.save();
 
-// Get single video metadata
-app.get('/videos/:id', async (req, res) => {
-  try {
-    const video = await Video.findById(req.params.id);
-    if (!video) return res.status(404).json({ error: "Video not found" });
-    res.json(video);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Health check
-app.get('/health', (req, res) => {
+  // Return the URL to use
   res.json({
-    status: mongoose.connection.readyState === 1 ? 'healthy' : 'degraded',
-    services: {
-      database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-      cloudinary: process.env.CLOUDINARY_NAME ? 'configured' : 'not configured',
-      storage: fs.existsSync(uploadsPath) ? 'available' : 'unavailable'
+    status: 'success',
+    video: {
+      id:       video._id,
+      url:      cloudinaryUrl || localPath,
+      filename: video.filename,
+      duration
     }
   });
 });
 
-// Start Server
-const startServer = async () => {
+// List Videos
+app.get('/videos', async (_req, res) => {
+  const list = await Video.find().sort({ uploadDate: -1 });
+  res.json(list);
+});
+
+// Get Single Video
+app.get('/videos/:id', async (req, res) => {
+  const video = await Video.findById(req.params.id);
+  if (!video) return res.status(404).json({ error: 'Not found' });
+  res.json(video);
+});
+
+// 12. Start Server
+(async () => {
   await connectDB();
   const PORT = process.env.PORT || 10000;
   app.listen(PORT, () => {
-    console.log(`
-✅ Server running on port ${PORT}
-📌 Upload:    POST   http://localhost:${PORT}/upload
-📺 Videos:    GET    http://localhost:${PORT}/videos
-📁 Storage:   ${uploadsPath}
-🌐 Frontend:  ${staticPath}
-🔍 NODE_ENV:  ${process.env.NODE_ENV || 'development'}
-    `);
+    console.log(`🚀 Server listening on http://localhost:${PORT}`);
   });
-};
-
-startServer().catch(err => {
-  console.error('⛔ Failed to start server:', err);
-  process.exit(1);
-});
+})();

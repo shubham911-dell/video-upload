@@ -1,0 +1,71 @@
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #eef1f5;
+    color: #333;
+  }
+  nav {
+    background: #222;
+    padding: 0.5rem;
+  }
+  nav ul {
+    display: flex;
+    list-style: none;
+    margin:0; padding:0;
+  }
+  nav li { margin-right: 1rem; }
+  nav a {
+    color: #ddd;
+    text-decoration: none;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    transition: background 0.3s;
+  }
+  nav a.active, nav a:hover {
+    background: #e91e63; color: #fff;
+  }
+  
+  .manage-list {
+    max-width: 960px;
+    margin: 2rem auto;
+  }
+  .video-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px,1fr));
+    gap: 1rem;
+  }
+  .video-item {
+    background: #fff;
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+  .video-item img {
+    width: 100%; display: block;
+  }
+  .video-item .info {
+    padding: 0.5rem;
+  }
+  .video-item .info h3 {
+    margin: 0; font-size: 1rem;
+  }
+  .video-item .actions {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.5rem;
+  }
+  .video-item .actions button {
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: opacity 0.3s;
+  }
+  .video-item .actions .edit {
+    background: #03a9f4; color: #fff;
+  }
+  .video-item .actions .delete {
+    background: #f44336; color: #fff;
+  }
+  .video-item .actions button:hover { opacity: 0.9; }
+  
